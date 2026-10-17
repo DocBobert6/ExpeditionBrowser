@@ -304,7 +304,8 @@ fun BrowserScreen(viewModel: BrowserViewModel) {
 
     }
 
-
+    // Overlay layer
+    Box(modifier = Modifier.fillMaxSize()) {
         // Find on Page bar
         if (overlay == BrowserViewModel.Overlay.FindOnPage) {
             FindOnPageBar(
@@ -356,6 +357,7 @@ fun BrowserScreen(viewModel: BrowserViewModel) {
                 onPrivacyReport = { viewModel.dismissOverlay() }
             )
         }
+    }
 
         DisposableEffect(Unit) {
         onDispose { webViewRef = null }
