@@ -1,0 +1,86 @@
+// Expedition Browser – Optical Glass Refraction Shader (AGSL)
+// Supports SDF superellipse, smooth-union morphing, rim lensing, specular.
+
+uniform shader backdrop;
+uniform float2 resolution;
+uniform float blurRadius;
+uniform float refractionIntensity;   // 0 = disabled (scroll throttle)
+uniform float morphProgress;         // 0..1 for liquid morph
+uniform float2 shapeCenter;
+uniform float2 shapeHalfSize;        // half-width / half-height of primary shape
+uniform float cornerRadius;
+uniform float2 secondaryCenter;      // for smooth-union (e.g. Back button)
+uniform float2 secondaryHalfSize;
+uniform float secondaryRadius;
+uniform float tiltAngle;             // radians, from rotation vector
+uniform float glassTintLuminance;    // adaptive
+uniform float3 glassTintColor;
+
+// Superellipse / rounded box SDF
+float sdRoundedBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+// Smooth union for liquid droplet morphing
+float opSmoothUnion(float d1, float d2, float k) {
+    float h = clamp(0.5 + 0.5 * (d2 - d1) / k, 0.0, 1.0);
+    return mix(d2, d1, h) - k * h * (1.0 - h);
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / resolution;
+    float2 p = fragCoord - shapeCenter;
+
+    // Primary shape SDF
+    float d1 = sdRoundedBox(p, shapeHalfSize, cornerRadius);
+
+    // Secondary shape (morph target) – scaled by morphProgress
+    float d2 = 1e5;
+    if (morphProgress > 0.001) {
+        float2 p2 = fragCoord - secondaryCenter;
+        float scale = mix(0.3, 1.0, morphProgress);
+        d2 = sdRoundedBox(p2, secondaryHalfSize * scale, secondaryRadius * scale);
+    }
+
+    // Smooth-union when morphing
+    float d = (morphProgress > 0.001)
+        ? opSmoothUnion(d1, d2, 18.0 * morphProgress)
+        : d1;
+
+    // Soft edge mask
+    float alpha = 1.0 - smoothstep(-1.5, 1.5, d);
+
+    // Rim band for lensing (wider on larger surfaces)
+    float rimWidth = mix(12.0, 24.0, length(shapeHalfSize) / 200.0);
+    float rimFactor = smoothstep(rimWidth, 0.0, abs(d));
+
+    // Refraction displacement (disabled when refractionIntensity == 0 during flings)
+    float2 displacement = float2(0.0);
+    if (refractionIntensity > 0.001) {
+        float2 dir = normalize(p + 0.0001);
+        displacement = dir * (refractionIntensity * rimFactor * 8.0);
+    }
+
+    float2 sampleCoord = fragCoord + displacement;
+    half4 color = backdrop.eval(sampleCoord);
+
+    // Mild saturation + brightness lift
+    float lum = dot(color.rgb, float3(0.299, 0.587, 0.114));
+    color.rgb = mix(float3(lum), color.rgb, 1.12);
+    color.rgb *= 1.04;
+
+    // Adaptive tint
+    color.rgb = mix(color.rgb, glassTintColor, 0.18 * (1.0 - glassTintLuminance));
+
+    // Specular rim – strongest top-left, modulated by device tilt
+    float2 lightDir = float2(cos(tiltAngle - 0.785), sin(tiltAngle - 0.785)); // ~45° base
+    float rimLight = pow(max(0.0, 1.0 - abs(d) / rimWidth), 3.0);
+    float specular = rimLight * max(0.0, dot(normalize(p), lightDir)) * 0.55;
+    color.rgb += specular;
+
+    // Soft outer falloff already handled by alpha
+    color.a *= alpha;
+
+    return color;
+}

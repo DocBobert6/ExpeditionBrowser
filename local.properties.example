@@ -1,0 +1,4 @@
+## Copy to local.properties and set your Android SDK path (only needed for local builds).
+## GitHub Actions does not need this file.
+
+sdk.dir=/path/to/Android/Sdk
